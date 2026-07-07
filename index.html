@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corvallis Window Washing Tracker</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        
+        /* Custom styling for the popup controls */
+        .popup-content { text-align: center; }
+        select, button { margin-top: 5px; padding: 5px; width: 100%; }
+        button { background-color: #007BFF; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .delete-btn { background-color: #dc3545; margin-top: 10px; }
+        .delete-btn:hover { background-color: #a71d2a; }
+        
+        /* Legend styling */
+        .legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 1.5em; }
+        .legend i { width: 12px; height: 12px; float: left; margin-right: 8px; border-radius: 50%; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. Initialize the map centered on Corvallis, OR
+        const map = L.map('map').setView([44.5646, -123.2620], 14);
+
+        // 2. Load the OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 3. Define our status colors
+        const statusColors = {
+            'washed': '#28a745',       // Green
+            'appointment': '#ffc107',  // Yellow
+            'declined': '#dc3545',     // Red
+            'unasked': '#6c757d'       // Gray
+        };
+
+        // 4. Load saved houses from the browser's Local Storage
+        let houses = JSON.parse(localStorage.getItem('window_washing_data')) || [];
+
+        // Function to save data
+        function saveData() {
+            localStorage.setItem('window_washing_data', JSON.stringify(houses));
+        }
+
+        // Function to create a circle marker on the map
+        function createMarker(house, index) {
+            const marker = L.circleMarker([house.lat, house.lng], {
+                radius: 8,
+                fillColor: statusColors[house.status],
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9
+            }).addTo(map);
+
+            // Build the popup menu for this marker
+            const popupHtml = `
+                <div class="popup-content">
+                    <strong>Update Status</strong><br>
+                    <select id="status-${index}">
+                        <option value="unasked" ${house.status === 'unasked' ? 'selected' : ''}>Unasked / Pending</option>
+                        <option value="appointment" ${house.status === 'appointment' ? 'selected' : ''}>Appointment Scheduled</option>
+                        <option value="washed" ${house.status === 'washed' ? 'selected' : ''}>Washed</option>
+                        <option value="declined" ${house.status === 'declined' ? 'selected' : ''}>Declined</option>
+                    </select>
+                    <button onclick="updateStatus(${index})">Save</button>
+                    <button class="delete-btn" onclick="deleteHouse(${index})">Remove Pin</button>
+                </div>
+            `;
+            
+            marker.bindPopup(popupHtml);
+            house.marker = marker; // Store reference to remove it later if needed
+        }
+
+        // Render all saved markers on load
+        houses.forEach((house, index) => createMarker(house, index));
+
+        // 5. Add a new pin when the map is clicked
+        map.on('click', function(e) {
+            const newHouse = {
+                lat: e.latlng.lat,
+                lng: e.latlng.lng,
+                status: 'unasked' // Default status
+            };
+            houses.push(newHouse);
+            saveData();
+            
+            // Re-render the specific marker
+            createMarker(newHouse, houses.length - 1);
+        });
+
+        // Global function to update a house's status from the popup
+        window.updateStatus = function(index) {
+            const newStatus = document.getElementById(`status-${index}`).value;
+            houses[index].status = newStatus;
+            saveData();
+            
+            // Update the marker color visually
+            houses[index].marker.setStyle({ fillColor: statusColors[newStatus] });
+            map.closePopup();
+        };
+
+        // Global function to delete a pin
+        window.deleteHouse = function(index) {
+            map.removeLayer(houses[index].marker);
+            houses.splice(index, 1);
+            
+            // Re-index everything to avoid breaking the array alignment
+            saveData();
+            location.reload(); // Quickest way to cleanly re-render after splice
+        };
+
+        // 6. Add a Legend to the map
+        const legend = L.control({position: 'bottomright'});
+        legend.onAdd = function () {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML += `<strong>Status Key</strong><br>`;
+            div.innerHTML += `<i style="background: ${statusColors['washed']}"></i> Washed<br>`;
+            div.innerHTML += `<i style="background: ${statusColors['appointment']}"></i> Appointment<br>`;
+            div.innerHTML += `<i style="background: ${statusColors['declined']}"></i> Declined<br>`;
+            div.innerHTML += `<i style="background: ${statusColors['unasked']}"></i> Unasked<br>`;
+            return div;
+        };
+        legend.addTo(map);
+
+    </script>
+</body>
+</html>
