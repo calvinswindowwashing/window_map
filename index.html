@@ -65,39 +65,29 @@
         <div id="map"></div>
     </div>
 
-    <!-- Leaflet & Firebase Scripts -->
+    <!-- Leaflet & Firebase Scripts (Version 8) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     
     <script>
-        // ==========================================
-        // PASTE YOUR FIREBASE CONFIGURATION HERE
-        // ==========================================
-   // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyCyBV_iOB5kGDJpfJsOs23JyUDd8CcBmaM",
-  authDomain: "corvallis-tracker.firebaseapp.com",
-  projectId: "corvallis-tracker",
-  storageBucket: "corvallis-tracker.firebasestorage.app",
-  messagingSenderId: "206516438640",
-  appId: "1:206516438640:web:1bdd53c114bddac27d56b5"
-};
-
-        // ==========================================
+        // 1. Firebase Configuration (Your exact keys)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCyBV_iOB5kGDJpfJsOs23JyUDd8CcBmaM",
+            authDomain: "corvallis-tracker.firebaseapp.com",
+            projectId: "corvallis-tracker",
+            storageBucket: "corvallis-tracker.firebasestorage.app",
+            messagingSenderId: "206516438640",
+            appId: "1:206516438640:web:1bdd53c114bddac27d56b5"
+        };
 
         // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        // App State
+        // App State Variables
         let map;
         let savedStatuses = {};
         let manualPins = [];
@@ -106,17 +96,17 @@ const firebaseConfig = {
         let currentUser = null;
 
         // --- AUTHENTICATION LOGIC ---
-        function login() {
+        window.login = function() {
             const email = document.getElementById('email').value;
             const pass = document.getElementById('password').value;
             auth.signInWithEmailAndPassword(email, pass).catch(err => {
                 document.getElementById('login-error').innerText = err.message;
             });
-        }
+        };
 
-        function logout() {
+        window.logout = function() {
             auth.signOut();
-        }
+        };
 
         // Listen for login/logout
         auth.onAuthStateChanged(user => {
@@ -130,6 +120,10 @@ const firebaseConfig = {
                 currentUser = null;
                 document.getElementById('login-screen').style.display = 'flex';
                 document.getElementById('app-screen').style.display = 'none';
+                if (map) {
+                    map.remove(); // Reset map if logging out
+                    map = null;
+                }
             }
         });
 
@@ -166,16 +160,21 @@ const firebaseConfig = {
 
         // Fetch data from Firebase
         async function loadUserData() {
+            document.getElementById('loading').style.display = 'flex';
             try {
                 const docRef = await db.collection('users').doc(currentUser.uid).get();
                 if (docRef.exists) {
                     const data = docRef.data();
                     savedStatuses = data.savedStatuses || {};
                     manualPins = data.manualPins || [];
+                } else {
+                    savedStatuses = {};
+                    manualPins = [];
                 }
-                loadCorvallisHouses(); // Load map points after cloud data is ready
+                loadCorvallisHouses(); 
             } catch (error) {
                 console.error("Error loading user data", error);
+                document.getElementById('loading').style.display = 'none';
             }
         }
 
@@ -185,7 +184,7 @@ const firebaseConfig = {
                 db.collection('users').doc(currentUser.uid).set({
                     savedStatuses: savedStatuses,
                     manualPins: manualPins
-                });
+                }).catch(error => console.error("Error saving to cloud: ", error));
             }
         }
 
@@ -224,7 +223,7 @@ const firebaseConfig = {
                 if (newStatus === 'unasked') delete savedStatuses[id];
                 else savedStatuses[id] = newStatus;
             }
-            saveDataToCloud(); // Syncs to Firebase immediately
+            saveDataToCloud();
             activeMarkers[id].setStyle({ fillColor: statusColors[newStatus] });
             map.closePopup();
         };
@@ -237,8 +236,6 @@ const firebaseConfig = {
         };
 
         async function loadCorvallisHouses() {
-            // Updated Query: Pulls ALL buildings except obvious non-houses (garages, sheds, roofs)
-            // This ensures older tagged neighborhoods like NW 13th are fully populated.
             const query = `
                 [out:json][timeout:30];
                 nwr["building"]["building"!~"garage|shed|roof|carport"](44.5000,-123.3200,44.6200,-123.2300);
@@ -256,7 +253,7 @@ const firebaseConfig = {
                     if (lat && lon) createMarker(element.id, lat, lon, 'unasked', false);
                 });
                 
-                // Draw manual pins over the top
+                // Draw manual pins
                 manualPins.forEach(pin => createMarker(pin.id, pin.lat, pin.lng, pin.status, true));
             } catch (error) {
                 alert("Failed to load map data. Please refresh.");
