@@ -5,101 +5,207 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Corvallis Window Washing Tracker</title>
     
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
-        #map { height: 100vh; width: 100%; }
         
-        /* Loading Screen */
+        /* UI Screens */
+        #login-screen {
+            height: 100vh; display: flex; flex-direction: column; 
+            justify-content: center; align-items: center; background: #f4f4f9;
+        }
+        .login-box {
+            background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; width: 300px;
+        }
+        .login-box input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        .login-box button { width: 100%; padding: 10px; background: #007BFF; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        
+        #app-screen { display: none; height: 100vh; width: 100%; position: relative; }
+        #map { height: 100%; width: 100%; }
+        
         #loading {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(255,255,255,0.9); z-index: 9999;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
         }
-        .spinner {
-            border: 6px solid #f3f3f3; border-top: 6px solid #007BFF;
-            border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite;
-        }
+        .spinner { border: 6px solid #f3f3f3; border-top: 6px solid #007BFF; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        /* Popup Controls */
+        /* Popups & Legend */
         .popup-content { text-align: center; min-width: 150px; }
-        select, button { margin-top: 8px; padding: 8px; width: 100%; box-sizing: border-box; }
-        button { background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:hover { background-color: #0056b3; }
-        .delete-btn { background-color: #dc3545; margin-top: 10px; }
-        .delete-btn:hover { background-color: #a71d2a; }
+        select, .popup-content button { margin-top: 8px; padding: 8px; width: 100%; box-sizing: border-box; }
+        .popup-content button { background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .delete-btn { background-color: #dc3545 !important; margin-top: 10px; }
         
-        /* Legend */
         .legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 1.5em; }
         .legend i { width: 12px; height: 12px; float: left; margin-right: 8px; border-radius: 50%; margin-top: 4px; }
+        .logout-btn { background: #dc3545; color: white; border: none; padding: 5px 10px; margin-top: 10px; border-radius: 3px; cursor: pointer; width: 100%; }
     </style>
 </head>
 <body>
 
-    <!-- Loading Overlay -->
-    <div id="loading">
-        <div class="spinner"></div>
-        <h3 style="margin-top: 20px;">Loading Corvallis Houses...</h3>
-        <p>This takes a few seconds.</p>
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="login-box">
+            <h2>Tracker Login</h2>
+            <input type="email" id="email" placeholder="Email">
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="login()">Login</button>
+            <p id="login-error" style="color:red; font-size: 14px;"></p>
+        </div>
     </div>
 
-    <div id="map"></div>
+    <!-- Main App Screen -->
+    <div id="app-screen">
+        <div id="loading">
+            <div class="spinner"></div>
+            <h3 style="margin-top: 20px;">Loading Corvallis Map & Data...</h3>
+        </div>
+        <div id="map"></div>
+    </div>
 
-    <!-- Leaflet JavaScript -->
+    <!-- Leaflet & Firebase Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    
     <script>
-        // 1. Initialize map with Canvas rendering for high performance
-        const map = L.map('map', { preferCanvas: true }).setView([44.5646, -123.2620], 14);
+        // ==========================================
+        // PASTE YOUR FIREBASE CONFIGURATION HERE
+        // ==========================================
+   // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCyBV_iOB5kGDJpfJsOs23JyUDd8CcBmaM",
+  authDomain: "corvallis-tracker.firebaseapp.com",
+  projectId: "corvallis-tracker",
+  storageBucket: "corvallis-tracker.firebasestorage.app",
+  messagingSenderId: "206516438640",
+  appId: "1:206516438640:web:1bdd53c114bddac27d56b5"
+};
 
-        // 2. Define status colors
-        const statusColors = {
-            'washed': '#28a745',       // Green
-            'appointment': '#ffc107',  // Yellow
-            'declined': '#dc3545',     // Red
-            'unasked': '#6c757d'       // Gray
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
         };
+        // ==========================================
 
-        // 3. Load saved data from browser
-        // savedStatuses holds OpenStreetMap houses: { "12345": "washed" }
-        // manualPins holds pins you dropped: [ { id: "m1", lat: 44, lng: -123, status: "appointment" } ]
-        let savedStatuses = JSON.parse(localStorage.getItem('window_washing_statuses')) || {};
-        let manualPins = JSON.parse(localStorage.getItem('window_washing_manual')) || [];
-        
-        // We will store all active marker objects here so we can update them
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // App State
+        let map;
+        let savedStatuses = {};
+        let manualPins = [];
         const activeMarkers = {};
+        const statusColors = { 'washed': '#28a745', 'appointment': '#ffc107', 'declined': '#dc3545', 'unasked': '#6c757d' };
+        let currentUser = null;
 
-        // Function to create and draw a marker
-        function createMarker(id, lat, lng, defaultStatus, isManual) {
-            // Determine status: check saved data, otherwise use default
-            let currentStatus = defaultStatus;
-            if (!isManual && savedStatuses[id]) {
-                currentStatus = savedStatuses[id];
+        // --- AUTHENTICATION LOGIC ---
+        function login() {
+            const email = document.getElementById('email').value;
+            const pass = document.getElementById('password').value;
+            auth.signInWithEmailAndPassword(email, pass).catch(err => {
+                document.getElementById('login-error').innerText = err.message;
+            });
+        }
+
+        function logout() {
+            auth.signOut();
+        }
+
+        // Listen for login/logout
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('app-screen').style.display = 'block';
+                initMap();
+                loadUserData();
+            } else {
+                currentUser = null;
+                document.getElementById('login-screen').style.display = 'flex';
+                document.getElementById('app-screen').style.display = 'none';
             }
+        });
+
+        // --- MAP & CLOUD DATA LOGIC ---
+        function initMap() {
+            if (!map) {
+                map = L.map('map', { preferCanvas: true }).setView([44.5646, -123.2620], 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+                // Manual pin drop
+                map.on('click', function(e) {
+                    const newId = 'manual_' + Date.now();
+                    const newPin = { id: newId, lat: e.latlng.lat, lng: e.latlng.lng, status: 'unasked' };
+                    manualPins.push(newPin);
+                    saveDataToCloud();
+                    createMarker(newId, newPin.lat, newPin.lng, 'unasked', true).openPopup();
+                });
+
+                // Legend & Logout Button
+                const legend = L.control({position: 'bottomright'});
+                legend.onAdd = function () {
+                    const div = L.DomUtil.create('div', 'legend');
+                    div.innerHTML += `<strong>Status Key</strong><br>
+                                      <i style="background: ${statusColors['washed']}"></i> Washed<br>
+                                      <i style="background: ${statusColors['appointment']}"></i> Appt.<br>
+                                      <i style="background: ${statusColors['declined']}"></i> Declined<br>
+                                      <i style="background: ${statusColors['unasked']}"></i> Unasked<br>
+                                      <button class="logout-btn" onclick="logout()">Log Out</button>`;
+                    return div;
+                };
+                legend.addTo(map);
+            }
+        }
+
+        // Fetch data from Firebase
+        async function loadUserData() {
+            try {
+                const docRef = await db.collection('users').doc(currentUser.uid).get();
+                if (docRef.exists) {
+                    const data = docRef.data();
+                    savedStatuses = data.savedStatuses || {};
+                    manualPins = data.manualPins || [];
+                }
+                loadCorvallisHouses(); // Load map points after cloud data is ready
+            } catch (error) {
+                console.error("Error loading user data", error);
+            }
+        }
+
+        // Save data to Firebase
+        function saveDataToCloud() {
+            if (currentUser) {
+                db.collection('users').doc(currentUser.uid).set({
+                    savedStatuses: savedStatuses,
+                    manualPins: manualPins
+                });
+            }
+        }
+
+        function createMarker(id, lat, lng, defaultStatus, isManual) {
+            let currentStatus = defaultStatus;
+            if (!isManual && savedStatuses[id]) currentStatus = savedStatuses[id];
 
             const marker = L.circleMarker([lat, lng], {
-                radius: 6,
-                fillColor: statusColors[currentStatus],
-                color: '#fff',
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9
+                radius: 5, fillColor: statusColors[currentStatus], color: '#fff', weight: 1, opacity: 1, fillOpacity: 0.9
             }).addTo(map);
 
-            // Create popup template
             const popupHtml = `
                 <div class="popup-content">
                     <strong>Update Status</strong><br>
                     <select id="status-${id}">
                         <option value="unasked" ${currentStatus === 'unasked' ? 'selected' : ''}>Unasked / Pending</option>
-                        <option value="appointment" ${currentStatus === 'appointment' ? 'selected' : ''}>Appointment Scheduled</option>
+                        <option value="appointment" ${currentStatus === 'appointment' ? 'selected' : ''}>Appointment</option>
                         <option value="washed" ${currentStatus === 'washed' ? 'selected' : ''}>Washed</option>
                         <option value="declined" ${currentStatus === 'declined' ? 'selected' : ''}>Declined</option>
                     </select>
@@ -107,110 +213,61 @@
                     ${isManual ? `<button class="delete-btn" onclick="deleteManualPin('${id}')">Remove Pin</button>` : ''}
                 </div>
             `;
-            
             marker.bindPopup(popupHtml);
             activeMarkers[id] = marker;
-            
             return marker;
         }
 
-        // Global function to update a house's status
         window.updateStatus = function(id, isManual) {
             const newStatus = document.getElementById(`status-${id}`).value;
-            
             if (isManual) {
-                // Update manual pin array
                 const pin = manualPins.find(p => p.id === id);
                 if (pin) pin.status = newStatus;
-                localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
             } else {
-                // Update OSM house object
-                if (newStatus === 'unasked') {
-                    delete savedStatuses[id]; // Save space by removing default statuses
-                } else {
-                    savedStatuses[id] = newStatus;
-                }
-                localStorage.setItem('window_washing_statuses', JSON.stringify(savedStatuses));
+                if (newStatus === 'unasked') delete savedStatuses[id];
+                else savedStatuses[id] = newStatus;
             }
-            
-            // Update visual color
+            saveDataToCloud(); // Syncs to Firebase immediately
             activeMarkers[id].setStyle({ fillColor: statusColors[newStatus] });
             map.closePopup();
         };
 
-        // Global function to delete a manual pin
         window.deleteManualPin = function(id) {
             map.removeLayer(activeMarkers[id]);
             delete activeMarkers[id];
             manualPins = manualPins.filter(p => p.id !== id);
-            localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
+            saveDataToCloud();
         };
 
-        // 4. Fetch Corvallis Building Data from Overpass API
         async function loadCorvallisHouses() {
-            // Bounding box roughly around Corvallis
+            // Updated Query: Pulls ALL buildings except obvious non-houses (garages, sheds, roofs)
+            // This ensures older tagged neighborhoods like NW 13th are fully populated.
             const query = `
-                [out:json][timeout:25];
-                (
-                  way["building"~"house|detached|residential|apartments"](44.5000,-123.3200,44.6200,-123.2300);
-                );
+                [out:json][timeout:30];
+                nwr["building"]["building"!~"garage|shed|roof|carport"](44.5000,-123.3200,44.6200,-123.2300);
                 out center;
             `;
-            
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
             
             try {
                 const response = await fetch(url);
                 const data = await response.json();
                 
-                // Draw each house
                 data.elements.forEach(element => {
-                    if (element.center) {
-                        createMarker(element.id, element.center.lat, element.center.lon, 'unasked', false);
-                    }
+                    const lat = element.center ? element.center.lat : element.lat;
+                    const lon = element.center ? element.center.lon : element.lon;
+                    if (lat && lon) createMarker(element.id, lat, lon, 'unasked', false);
                 });
                 
+                // Draw manual pins over the top
+                manualPins.forEach(pin => createMarker(pin.id, pin.lat, pin.lng, pin.status, true));
             } catch (error) {
-                alert("Failed to load map data. Please check your internet connection and refresh.");
+                alert("Failed to load map data. Please refresh.");
                 console.error(error);
             } finally {
-                // Hide loading screen
                 document.getElementById('loading').style.display = 'none';
             }
         }
-
-        // 5. Draw manual pins on load
-        manualPins.forEach(pin => {
-            createMarker(pin.id, pin.lat, pin.lng, pin.status, true);
-        });
-
-        // 6. Allow clicking the map to add a custom pin
-        map.on('click', function(e) {
-            const newId = 'manual_' + Date.now();
-            const newPin = { id: newId, lat: e.latlng.lat, lng: e.latlng.lng, status: 'unasked' };
-            manualPins.push(newPin);
-            localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
-            
-            const marker = createMarker(newId, newPin.lat, newPin.lng, 'unasked', true);
-            marker.openPopup();
-        });
-
-        // 7. Add Legend
-        const legend = L.control({position: 'bottomright'});
-        legend.onAdd = function () {
-            const div = L.DomUtil.create('div', 'legend');
-            div.innerHTML += `<strong>Status Key</strong><br>`;
-            div.innerHTML += `<i style="background: ${statusColors['washed']}"></i> Washed<br>`;
-            div.innerHTML += `<i style="background: ${statusColors['appointment']}"></i> Appointment<br>`;
-            div.innerHTML += `<i style="background: ${statusColors['declined']}"></i> Declined<br>`;
-            div.innerHTML += `<i style="background: ${statusColors['unasked']}"></i> Unasked<br>`;
-            return div;
-        };
-        legend.addTo(map);
-
-        // Start the data fetch
-        loadCorvallisHouses();
-
     </script>
 </body>
 </html>
