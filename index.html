@@ -5,41 +5,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Corvallis Window Washing Tracker</title>
     
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
         #map { height: 100vh; width: 100%; }
         
-        /* Custom styling for the popup controls */
-        .popup-content { text-align: center; }
-        select, button { margin-top: 5px; padding: 5px; width: 100%; }
-        button { background-color: #007BFF; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        /* Loading Screen */
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9); z-index: 9999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+        .spinner {
+            border: 6px solid #f3f3f3; border-top: 6px solid #007BFF;
+            border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Popup Controls */
+        .popup-content { text-align: center; min-width: 150px; }
+        select, button { margin-top: 8px; padding: 8px; width: 100%; box-sizing: border-box; }
+        button { background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background-color: #0056b3; }
         .delete-btn { background-color: #dc3545; margin-top: 10px; }
         .delete-btn:hover { background-color: #a71d2a; }
         
-        /* Legend styling */
+        /* Legend */
         .legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 1.5em; }
         .legend i { width: 12px; height: 12px; float: left; margin-right: 8px; border-radius: 50%; margin-top: 4px; }
     </style>
 </head>
 <body>
 
+    <!-- Loading Overlay -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <h3 style="margin-top: 20px;">Loading Corvallis Houses...</h3>
+        <p>This takes a few seconds.</p>
+    </div>
+
     <div id="map"></div>
 
+    <!-- Leaflet JavaScript -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // 1. Initialize the map centered on Corvallis, OR
-        const map = L.map('map').setView([44.5646, -123.2620], 14);
+        // 1. Initialize map with Canvas rendering for high performance
+        const map = L.map('map', { preferCanvas: true }).setView([44.5646, -123.2620], 14);
 
-        // 2. Load the OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
+            attribution: '© OpenStreetMap'
         }).addTo(map);
 
-        // 3. Define our status colors
+        // 2. Define status colors
         const statusColors = {
             'washed': '#28a745',       // Green
             'appointment': '#ffc107',  // Yellow
@@ -47,83 +67,135 @@
             'unasked': '#6c757d'       // Gray
         };
 
-        // 4. Load saved houses from the browser's Local Storage
-        let houses = JSON.parse(localStorage.getItem('window_washing_data')) || [];
+        // 3. Load saved data from browser
+        // savedStatuses holds OpenStreetMap houses: { "12345": "washed" }
+        // manualPins holds pins you dropped: [ { id: "m1", lat: 44, lng: -123, status: "appointment" } ]
+        let savedStatuses = JSON.parse(localStorage.getItem('window_washing_statuses')) || {};
+        let manualPins = JSON.parse(localStorage.getItem('window_washing_manual')) || [];
+        
+        // We will store all active marker objects here so we can update them
+        const activeMarkers = {};
 
-        // Function to save data
-        function saveData() {
-            localStorage.setItem('window_washing_data', JSON.stringify(houses));
-        }
+        // Function to create and draw a marker
+        function createMarker(id, lat, lng, defaultStatus, isManual) {
+            // Determine status: check saved data, otherwise use default
+            let currentStatus = defaultStatus;
+            if (!isManual && savedStatuses[id]) {
+                currentStatus = savedStatuses[id];
+            }
 
-        // Function to create a circle marker on the map
-        function createMarker(house, index) {
-            const marker = L.circleMarker([house.lat, house.lng], {
-                radius: 8,
-                fillColor: statusColors[house.status],
-                color: '#000',
+            const marker = L.circleMarker([lat, lng], {
+                radius: 6,
+                fillColor: statusColors[currentStatus],
+                color: '#fff',
                 weight: 1,
                 opacity: 1,
                 fillOpacity: 0.9
             }).addTo(map);
 
-            // Build the popup menu for this marker
+            // Create popup template
             const popupHtml = `
                 <div class="popup-content">
                     <strong>Update Status</strong><br>
-                    <select id="status-${index}">
-                        <option value="unasked" ${house.status === 'unasked' ? 'selected' : ''}>Unasked / Pending</option>
-                        <option value="appointment" ${house.status === 'appointment' ? 'selected' : ''}>Appointment Scheduled</option>
-                        <option value="washed" ${house.status === 'washed' ? 'selected' : ''}>Washed</option>
-                        <option value="declined" ${house.status === 'declined' ? 'selected' : ''}>Declined</option>
+                    <select id="status-${id}">
+                        <option value="unasked" ${currentStatus === 'unasked' ? 'selected' : ''}>Unasked / Pending</option>
+                        <option value="appointment" ${currentStatus === 'appointment' ? 'selected' : ''}>Appointment Scheduled</option>
+                        <option value="washed" ${currentStatus === 'washed' ? 'selected' : ''}>Washed</option>
+                        <option value="declined" ${currentStatus === 'declined' ? 'selected' : ''}>Declined</option>
                     </select>
-                    <button onclick="updateStatus(${index})">Save</button>
-                    <button class="delete-btn" onclick="deleteHouse(${index})">Remove Pin</button>
+                    <button onclick="updateStatus('${id}', ${isManual})">Save</button>
+                    ${isManual ? `<button class="delete-btn" onclick="deleteManualPin('${id}')">Remove Pin</button>` : ''}
                 </div>
             `;
             
             marker.bindPopup(popupHtml);
-            house.marker = marker; // Store reference to remove it later if needed
+            activeMarkers[id] = marker;
+            
+            return marker;
         }
 
-        // Render all saved markers on load
-        houses.forEach((house, index) => createMarker(house, index));
-
-        // 5. Add a new pin when the map is clicked
-        map.on('click', function(e) {
-            const newHouse = {
-                lat: e.latlng.lat,
-                lng: e.latlng.lng,
-                status: 'unasked' // Default status
-            };
-            houses.push(newHouse);
-            saveData();
+        // Global function to update a house's status
+        window.updateStatus = function(id, isManual) {
+            const newStatus = document.getElementById(`status-${id}`).value;
             
-            // Re-render the specific marker
-            createMarker(newHouse, houses.length - 1);
-        });
-
-        // Global function to update a house's status from the popup
-        window.updateStatus = function(index) {
-            const newStatus = document.getElementById(`status-${index}`).value;
-            houses[index].status = newStatus;
-            saveData();
+            if (isManual) {
+                // Update manual pin array
+                const pin = manualPins.find(p => p.id === id);
+                if (pin) pin.status = newStatus;
+                localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
+            } else {
+                // Update OSM house object
+                if (newStatus === 'unasked') {
+                    delete savedStatuses[id]; // Save space by removing default statuses
+                } else {
+                    savedStatuses[id] = newStatus;
+                }
+                localStorage.setItem('window_washing_statuses', JSON.stringify(savedStatuses));
+            }
             
-            // Update the marker color visually
-            houses[index].marker.setStyle({ fillColor: statusColors[newStatus] });
+            // Update visual color
+            activeMarkers[id].setStyle({ fillColor: statusColors[newStatus] });
             map.closePopup();
         };
 
-        // Global function to delete a pin
-        window.deleteHouse = function(index) {
-            map.removeLayer(houses[index].marker);
-            houses.splice(index, 1);
-            
-            // Re-index everything to avoid breaking the array alignment
-            saveData();
-            location.reload(); // Quickest way to cleanly re-render after splice
+        // Global function to delete a manual pin
+        window.deleteManualPin = function(id) {
+            map.removeLayer(activeMarkers[id]);
+            delete activeMarkers[id];
+            manualPins = manualPins.filter(p => p.id !== id);
+            localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
         };
 
-        // 6. Add a Legend to the map
+        // 4. Fetch Corvallis Building Data from Overpass API
+        async function loadCorvallisHouses() {
+            // Bounding box roughly around Corvallis
+            const query = `
+                [out:json][timeout:25];
+                (
+                  way["building"~"house|detached|residential|apartments"](44.5000,-123.3200,44.6200,-123.2300);
+                );
+                out center;
+            `;
+            
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                // Draw each house
+                data.elements.forEach(element => {
+                    if (element.center) {
+                        createMarker(element.id, element.center.lat, element.center.lon, 'unasked', false);
+                    }
+                });
+                
+            } catch (error) {
+                alert("Failed to load map data. Please check your internet connection and refresh.");
+                console.error(error);
+            } finally {
+                // Hide loading screen
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // 5. Draw manual pins on load
+        manualPins.forEach(pin => {
+            createMarker(pin.id, pin.lat, pin.lng, pin.status, true);
+        });
+
+        // 6. Allow clicking the map to add a custom pin
+        map.on('click', function(e) {
+            const newId = 'manual_' + Date.now();
+            const newPin = { id: newId, lat: e.latlng.lat, lng: e.latlng.lng, status: 'unasked' };
+            manualPins.push(newPin);
+            localStorage.setItem('window_washing_manual', JSON.stringify(manualPins));
+            
+            const marker = createMarker(newId, newPin.lat, newPin.lng, 'unasked', true);
+            marker.openPopup();
+        });
+
+        // 7. Add Legend
         const legend = L.control({position: 'bottomright'});
         legend.onAdd = function () {
             const div = L.DomUtil.create('div', 'legend');
@@ -135,6 +207,9 @@
             return div;
         };
         legend.addTo(map);
+
+        // Start the data fetch
+        loadCorvallisHouses();
 
     </script>
 </body>
